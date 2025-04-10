@@ -1,0 +1,32 @@
+{
+  "name": "project-analysis",
+  "version": "1.0.0",
+  "description": "Get advice on project architecture and code cleanliness",
+  "private": true,
+  "type": "module",
+  "bin": {
+    "project-analysis": "./build/index.js"
+  },
+  "files": [
+    "build"
+  ],
+  "scripts": {
+    "build": "tsc && node -e \"require('fs').chmodSync('build/index.js', '755')\"",
+    "prepare": "npm run build",
+    "watch": "tsc --watch",
+    "inspector": "npx @modelcontextprotocol/inspector build/index.js",
+    "start": "node build/index.js"
+  },
+  "dependencies": {
+    "@ai-sdk/google-vertex": "^2.2.7",
+    "@ai-sdk/openai": "^1.3.6",
+    "@modelcontextprotocol/sdk": "^1.7.0",
+    "ai": "^4.2.10",
+    "zod": "^3.22.4"
+  },
+  "devDependencies": {
+    "@anthropic-ai/sdk": "^0.39.0",
+    "@types/node": "^20.11.24",
+    "typescript": "^5.3.3"
+  }
+}

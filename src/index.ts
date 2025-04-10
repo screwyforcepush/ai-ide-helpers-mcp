@@ -1,0 +1,134 @@
+#!/usr/bin/env node
+/**
+ * Project Analysis MCP Server
+ * 
+ * This server provides tools for analyzing code architecture and code cleanliness.
+ * - analyze-architecture: Analyzes project structure and recommends architecture improvements
+ * - analyze-code: Analyzes codebase for unused code and suggests cleanup
+ */
+
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+
+
+// Import tool implementations
+import { analyzeArchitecture } from "./tools/architectSolutionTool.js";
+import { analyzeCode } from "./tools/codeCleanlinessTool.js";
+
+// Debug logger
+const DEBUG = process.env.DEBUG === '1' || process.env.DEBUG === 'true';
+function logDebug(...args: any[]): void {
+  if (DEBUG) {
+    console.error('[DEBUG]', ...args);
+  }
+}
+
+// Helper function to change working directory to the project root
+function ensureProjectRoot() {
+  // Calculate project root assuming this file is in "src/"
+  const currentFile = fileURLToPath(import.meta.url);
+  const currentDir = dirname(currentFile);
+  const projectRoot = join(currentDir, '..', '..', '..', '..');
+  try {
+    process.chdir(projectRoot);
+    logDebug('Changed working directory to:', process.cwd());
+  } catch (err) {
+    logDebug('Failed to change working directory:', err);
+  }
+}
+
+
+
+// Create MCP server
+const server = new McpServer({
+  name: "project-analysis",
+  version: "1.0.0",
+  description: "Get advice on project architecture and code cleanliness"
+});
+
+// Register the architecture analysis tool
+// Note: following the SDK documentation format
+server.tool(
+  "solution-design",
+  "Get an implementation plan for a given task",
+  { task: z.string().describe("Description of the task. Include requirements, constraints, and any other relevant information provided by the user.") },
+  async ({ task }) => {
+    ensureProjectRoot();
+    try {
+      const result = await analyzeArchitecture(task);
+      
+      // Make sure content items have the correct type
+      return {
+        content: result.content.map(item => ({
+          type: "text",
+          text: item.text
+        }))
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logDebug('Error in analyze-architecture tool:', errorMessage);
+      return {
+        content: [{ 
+          type: "text", 
+          text: `Architecture analysis failed: ${errorMessage}` 
+        }]
+      };
+    }
+  }
+);
+
+// Register the code cleanliness tool
+server.tool(
+  "unused-report",
+  "Get report of unused files, dependencies and exports",
+  {}, // No parameters needed now
+  async () => {
+    ensureProjectRoot();
+    try {
+      const result = await analyzeCode();
+      
+      // Convert the result to the format expected by the SDK
+      return {
+        content: result.content.map(item => ({
+          type: "text",
+          text: item.text
+        }))
+      };
+    } catch (error) {
+      const errorMessage = error instanceof Error ? error.message : String(error);
+      logDebug('Error in analyze-code tool:', errorMessage);
+      return {
+        content: [{ 
+          type: "text", 
+          text: `Code cleanliness analysis failed: ${errorMessage}` 
+        }]
+      };
+    }
+  }
+);
+
+// Start the server with stdio transport
+const transport = new StdioServerTransport();
+
+async function main() {
+  try {
+    logDebug('Starting project-analysis MCP server...');
+    await server.connect(transport);
+    logDebug('MCP server running on stdio');
+    
+    // Handle ctrl+c gracefully
+    process.on('SIGINT', async () => {
+      logDebug('Shutting down...');
+      await server.close();
+      process.exit(0);
+    });
+  } catch (error) {
+    console.error('Failed to start MCP server:', error);
+    process.exit(1);
+  }
+}
+
+main();
