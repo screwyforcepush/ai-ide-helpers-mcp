@@ -53,8 +53,8 @@ const server = new McpServer({
 // Note: following the SDK documentation format
 server.tool(
   "solution-design",
-  "Get an implementation plan for a given task",
-  { task: z.string().describe("Description of the task. Include requirements, constraints, and any other relevant information provided by the user.") },
+  "Generate a step-by-step implementation checklist for a development task. Creates implementation-plan.md file at root directory. Use this file to track progress by checking off completed steps.",
+  { task: z.string().describe("Description of the task. \n\nInclude context provided by the user including desigred outcome, requirements, constraints, technical specificities, etc...\nProvide implementation attempts, test results, and other highly specific and relevant detail when possible.") },
   async ({ task }) => {
     ensureProjectRoot();
     try {

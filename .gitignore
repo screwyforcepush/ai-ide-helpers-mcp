@@ -1,3 +1,6 @@
 node_modules
 .cursor
 .DS_Store
+vertex-ai-key.json
+repomix-output.txt
+scripts/

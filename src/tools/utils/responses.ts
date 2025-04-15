@@ -57,7 +57,7 @@ async function promptModel(modelId: string, prompt: string): Promise<string> {
       prompt,
     });
 
-    return text + ' [DEBUG]' + process.env.GOOGLE_VERTEX_PROJECT + ' ' + process.env.GOOGLE_VERTEX_LOCATION;
+    return text;
   } catch (error) {
     console.error(`Error prompting ${modelId}:`, error);
     return 'Error prompting '+modelId+': '+error;

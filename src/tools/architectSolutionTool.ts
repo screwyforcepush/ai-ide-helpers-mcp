@@ -3,14 +3,8 @@ import fs from 'fs/promises';
 import { cleanCommandResponse } from './utils/responses.js';
 import { ARCHITECT_RESPONSE_TEMPLATE } from './utils/prompts.js';
 import { callOpenAI, callVertexAI } from './utils/responses.js';
+import { logDebug, limitContentByTokens } from './utils/context.js';
 
-// Debug logger
-const DEBUG = process.env.DEBUG === '1' || process.env.DEBUG === 'true';
-function logDebug(...args: any[]): void {
-  if (DEBUG) {
-    console.error('[DEBUG]', ...args);
-  }
-}
 
 // Tool result type - simplified to match what we need
 interface ToolResult {
@@ -127,11 +121,11 @@ export async function analyzeArchitecture(
     const content = await getArchitectureAdvice(task, ripgrepOutput, repoContent, treeOutput);
     logDebug('Received architecture advice, returning raw content');
 
-    // Return the raw content
+    // Return the content with explicit checklist instructions
     return {
       content: [{ 
         type: 'text', 
-        text: content 
+        text: content + "\n\n## How to Use This Implementation Plan\n\nAn implementation checklist has been created for you in `implementation-plan.md`. Use this file to track your progress:\n\n- Each step is prefixed with `- [ ]` (unchecked)\n- Mark steps as completed by changing to `- [x]` (checked)\n- Follow the steps in sequence for best results"
       }]
     };
   } catch (error) {
@@ -156,10 +150,14 @@ async function getRipgrepCommand(task: string, fileStructure: string): Promise<s
   const model = 'o3-mini';
   logDebug(`Using OpenAI model: ${model}`);
   
+  // Use token-based limiting for the file structure
+  const limitedFileStructure = await limitContentByTokens(fileStructure, 10000, 40000);
+  logDebug(`File structure token-limited for the prompt`);
+  
   const prompt = 
     `You are SemanticLib. You are an expert in scouring a codebase to find the most relevant code or references.\n`+
     `you are given a project with the following structure:\n` +
-    `${fileStructure.length > 10000 ? fileStructure.substring(0, 10000) + "\n...(truncated)..." : fileStructure}\n\n` +
+    `${limitedFileStructure}\n\n` +
     `The solution architect has been tasked with: "${task}".\n` +
     `Suggest a ripgrep (rg) command that the Solution Architect should run at project root to find relevant code or references in the project. \n\n` +
     `focus on the key search patterns and related patterns.\n` +
@@ -194,12 +192,9 @@ async function getRipgrepCommand(task: string, fileStructure: string): Promise<s
 async function getRepomixCommand(task: string, searchOutput: string, fileStructure: string): Promise<string> {
   logDebug('Starting getRepomixCommand()');
   
-  
-  const searchSummary = searchOutput.length > 400000 
-    ? searchOutput.substring(0, 400000) + '\n...(truncated)...' 
-    : searchOutput;
-    
-  logDebug(`Search summary length: ${searchSummary.length} chars`);
+  // Use token-based limiting for the search output
+  const searchSummary = await limitContentByTokens(searchOutput, 100000, 400000);
+  logDebug(`Search output token-limited to approximately 100,000 tokens`);
     
   const prompt = 
     `You are CodeContextSynthasis.\nYou have the knack for identifying which project files are relevant for a given task, which may be impacted. \nYou cherry pick the relevant files to produce the final context to inform the Solution Architect.\n
@@ -265,22 +260,21 @@ async function getRepomixCommand(task: string, searchOutput: string, fileStructu
 async function getArchitectureAdvice(task: string, searchOutput: string, repoContent: string, fileStructure: string): Promise<string> {
   logDebug('Starting getArchitectureAdvice()');
   
+  // Use the new token-based content limiting utility
+  const repoSnippet = await limitContentByTokens(repoContent, 100000);
   
-  // Include limited portion of repoContent due to token constraints
-  const repoSnippet = repoContent.length > 500000 
-    ? repoContent.substring(0, 15000) + "\n...\n" 
-    : repoContent;
-  
-  logDebug(`Repo content length: ${repoContent.length}, using snippet of length: ${repoSnippet.length}`);
+  logDebug(`Repo content length: ${repoContent.length} characters, limited based on tokens`);
     
   const prompt = 
-    `Project code analysis for Assignment: "${task}"
+    `You are Archie Soldes, Lead Software Architect, responsible for Designing a Solution that will be implemented by the engineering team.
+Your strategic approach to Solution Design, yields concise, actionable, pragmatic, and outcome focused implementation plans. 
 
-You are an experienced software architect designing a solution that will be implemented by another engineer.
+
+Assignment: "${task}"
+
 
 [TASK]
-
-Ponder the Assignment within the context of the RepoSnippet
+Archie, Ponder the Assignment within the context of the RepoSnippet
 Think through a comprehensive architecture and implementation plan which details:
 - Current state assessment (existing patterns, components)
 - Recommended approach with design decisions and tradeoffs
@@ -289,9 +283,9 @@ Think through a comprehensive architecture and implementation plan which details
 - Documentation needs
 - Implementation sequence
 
-Focus on WHAT and WHY! Your Step-by-step implementationPlan describes needed components and their purpose. It does not include the code itself.
+Focus on WHAT and WHY! Your Step-by-step implementationPlan describes needed components and their purpose. It does not include the code itself, or deployment instructions.
 
-# Respond in the exact JSON format:
+# Respond in markdown format, adhering to the structured template:
 ${ARCHITECT_RESPONSE_TEMPLATE}
 
 
@@ -309,7 +303,7 @@ ${repoSnippet}`;
   
   logDebug(`Prompt for architecture advice: ${prompt}`);
   logDebug(`Using model: ${process.env.ARCHITECT_MODEL || 'openai'}`);
-  let content
+  let content;
   if (process.env.ARCHITECT_MODEL === 'gemini-2.5-pro-exp-03-25') {
     content = await callVertexAI(prompt);
   } else {
