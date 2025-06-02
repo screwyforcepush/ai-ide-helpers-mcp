@@ -4,3 +4,4 @@ node_modules
 vertex-ai-key.json
 repomix-output.txt
 scripts/
+.roo/mcp.json

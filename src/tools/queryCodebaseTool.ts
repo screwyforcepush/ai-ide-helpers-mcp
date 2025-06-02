@@ -1,10 +1,8 @@
-import { execSync, spawnSync, SpawnSyncOptionsWithStringEncoding } from 'child_process';
+import { spawnSync, SpawnSyncOptionsWithStringEncoding } from 'child_process';
 import fs from 'fs/promises';
 import { cleanCommandResponse } from './utils/responses.js';
-import { ARCHITECT_RESPONSE_TEMPLATE } from './utils/prompts.js';
-import { callOpenAI, callVertexAI } from './utils/responses.js';
+import { callVertexAI } from './utils/responses.js';
 import { logDebug, limitContentByTokens } from './utils/context.js';
-
 
 // Tool result type - simplified to match what we need
 interface ToolResult {
@@ -16,16 +14,16 @@ interface ToolResult {
 }
 
 /**
- * Analyze architecture and provide recommendations
+ * Query the codebase and return the raw repomix output
  * @param task The task description to analyze
- * @returns Tool result with architecture advice
+ * @returns Tool result with the raw repomix output
  */
-export async function analyzeArchitecture(
-  task: string, 
+export async function queryCodebase(
+  task: string,
   additionalContext?: string,
 ): Promise<ToolResult> {
   try {
-    logDebug(`Starting architecture analysis for task: "${task}"`);
+    logDebug(`Starting codebase query for task: "${task}"`);
     
     // Step 1: Get project structure using `tree`
     logDebug('Running tree command to get directory structure...');
@@ -116,21 +114,16 @@ export async function analyzeArchitecture(
       throw new Error(errorMsg);
     }
 
-    // Step 6: Get architecture advice
-    logDebug('Requesting architecture advice from OpenAI...');
-    const content = await getArchitectureAdvice(task, ripgrepOutput, repoContent, treeOutput);
-    logDebug('Received architecture advice, returning raw content');
-
-    // Return the content with explicit checklist instructions
+    // Return the repomix output directly
     return {
       content: [{ 
         type: 'text', 
-        text: content + "\n\n## How to Use This Implementation Plan\n\nAn implementation checklist has been created for you in `implementation-plan.md`. Use this file to track your progress:\n\n- Each step is prefixed with `- [ ]` (unchecked)\n- Mark steps as completed by changing to `- [x]` (checked)\n- Follow the steps in sequence for best results"
+        text: repoContent
       }]
     };
   } catch (error) {
     // Handle errors by returning an error message
-    const errorMsg = `Architecture analysis failed: ${error instanceof Error ? error.message : error}`;
+    const errorMsg = `Codebase query failed: ${error instanceof Error ? error.message : error}`;
     logDebug(errorMsg);
     return {
       content: [{ 
@@ -220,7 +213,7 @@ async function getRepomixCommand(task: string, searchOutput: string, fileStructu
     `\`\`\`bash\n` +
     `repomix --include "src/**/*.ts,**/*.md,path/to/directory/file.ts"\n` +
     `\`\`\`\n\n`+
-    `# Respond only with the repomix command. Aim to include about 100-150 files with the repomix command.\n\n`;
+    `# Respond only with the repomix command. Aim to include about 10-20 files with the repomix command.\n\n`;
   
   logDebug(`Prompt for repomix command (first 100 chars): ${prompt.substring(0, 100)}...`);
   
@@ -252,85 +245,4 @@ async function getRepomixCommand(task: string, searchOutput: string, fileStructu
   }
   
   return cleanedCommand;
-}
-
-/**
- * Ask OpenAI for architecture recommendations based on the code context.
- */
-async function getArchitectureAdvice(task: string, searchOutput: string, repoContent: string, fileStructure: string): Promise<string> {
-  logDebug('Starting getArchitectureAdvice()');
-  
-  // Use the new token-based content limiting utility
-  const repoSnippet = await limitContentByTokens(repoContent, 100000);
-  
-  logDebug(`Repo content length: ${repoContent.length} characters, limited based on tokens`);
-    
-  const prompt = 
-    `You are Archie Soldes, Lead Software Architect, responsible for Designing a Solution that will be implemented by the engineering team.
-Your strategic approach to Solution Design, yields concise, actionable, pragmatic, and outcome focused implementation plans. 
-
-
-Assignment: "${task}"
-
-
-[TASK]
-Archie, Ponder the Assignment within the context of the RepoSnippet
-Think through a comprehensive architecture and implementation plan which details:
-- Current state assessment (existing patterns, components)
-- Recommended approach with design decisions and tradeoffs
-- Specific implementation changes (files, functions, interfaces)
-- Test implementation requirements 
-- Documentation needs
-- Implementation sequence
-
-Focus on WHAT and WHY! Your Step-by-step implementationPlan describes needed components and their purpose. It does not include the code itself, or deployment instructions.
-
-# Respond in markdown format, adhering to the structured template:
-${ARCHITECT_RESPONSE_TEMPLATE}
-
-
-[/TASK]
-
-
-
-# Full Project Tree:
-${fileStructure}
-
-
-
-# RepoSnippet:
-${repoSnippet}`;
-  
-  logDebug(`Prompt for architecture advice: ${prompt}`);
-  logDebug(`Using model: ${process.env.ARCHITECT_MODEL || 'openai'}`);
-  let content;
-  if (process.env.ARCHITECT_MODEL === 'gemini-2.5-pro-exp-03-25') {
-    content = await callVertexAI(prompt);
-  } else {
-    content = await callOpenAI(prompt);
-  }
-
-  // Remove markdown formatting
-  content = content.trim();
-  logDebug(`Raw OpenAI response for architecture advice (first 200 chars): ${content.substring(0, 200)}...`);
-  
-  if (content.startsWith('```')) {
-    const endIdx = content.indexOf('```', 3);
-    if (endIdx !== -1) {
-      content = content.substring(3, endIdx).trim();
-      logDebug('Removed markdown formatting from architecture advice');
-    }
-  }
-  
-  // Save the content to a file
-  try {
-    logDebug('Saving architecture advice to implementation-plan.md');
-    await fs.writeFile('implementation-plan.md', content, 'utf-8');
-    logDebug('Successfully saved implementation plan');
-  } catch (err) {
-    logDebug(`Failed to save implementation plan: ${err instanceof Error ? err.message : err}`);
-  }
-  
-  // Return the raw content as a string
-  return content;
 }
